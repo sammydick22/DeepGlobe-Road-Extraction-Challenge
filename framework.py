@@ -8,7 +8,7 @@ import numpy as np
 class MyFrame():
     def __init__(self, net, loss, lr=2e-4, evalmode = False):
         self.net = net().cuda()
-        self.net = torch.nn.DataParallel(self.net, device_ids=range(torch.cuda.device_count()))
+        self.net = torch.nn.DataParallel(self.net, device_ids=list(range(torch.cuda.device_count())))
         self.optimizer = torch.optim.Adam(params=self.net.parameters(), lr=lr)
         #self.optimizer = torch.optim.RMSprop(params=self.net.parameters(), lr=lr)
         self.loss = loss()
@@ -33,28 +33,30 @@ class MyFrame():
         return mask
     
     def test_batch(self):
-        self.forward(volatile=True)
-        mask =  self.net.forward(self.img).cpu().data.numpy().squeeze(1)
-        mask[mask>0.5] = 1
-        mask[mask<=0.5] = 0
+        with torch.no_grad():
+            self.forward()
+            mask = self.net.forward(self.img).cpu().data.numpy().squeeze(1)
+            mask[mask>0.5] = 1
+            mask[mask<=0.5] = 0
         
         return mask, self.img_id
     
     def test_one_img_from_path(self, path):
         img = cv2.imread(path)
         img = np.array(img, np.float32)/255.0 * 3.2 - 1.6
-        img = V(torch.Tensor(img).cuda())
+        img = torch.Tensor(img).cuda()
         
-        mask = self.net.forward(img).squeeze().cpu().data.numpy()#.squeeze(1)
-        mask[mask>0.5] = 1
-        mask[mask<=0.5] = 0
+        with torch.no_grad():
+            mask = self.net.forward(img).squeeze().cpu().data.numpy()
+            mask[mask>0.5] = 1
+            mask[mask<=0.5] = 0
         
         return mask
         
     def forward(self, volatile=False):
-        self.img = V(self.img.cuda(), volatile=volatile)
+        self.img = self.img.cuda()
         if self.mask is not None:
-            self.mask = V(self.mask.cuda(), volatile=volatile)
+            self.mask = self.mask.cuda()
         
     def optimize(self):
         self.forward()
@@ -63,7 +65,7 @@ class MyFrame():
         loss = self.loss(self.mask, pred)
         loss.backward()
         self.optimizer.step()
-        return loss.data[0]
+        return loss.item()
         
     def save(self, path):
         torch.save(self.net.state_dict(), path)
@@ -77,6 +79,6 @@ class MyFrame():
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = new_lr
 
-        print >> mylog, 'update learning rate: %f -> %f' % (self.old_lr, new_lr)
-        print 'update learning rate: %f -> %f' % (self.old_lr, new_lr)
+        print('update learning rate: %f -> %f' % (self.old_lr, new_lr), file=mylog)
+        print('update learning rate: %f -> %f' % (self.old_lr, new_lr))
         self.old_lr = new_lr
